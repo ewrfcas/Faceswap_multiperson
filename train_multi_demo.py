@@ -56,6 +56,4 @@ args = parser.parse_args()
 
 # train_model = train_multi.Train(args)
 convert_model = convert_multi.Convert(args)
-while True:
-    convert_model.process()
-    break
+convert_model.process()
