@@ -13,10 +13,12 @@ from scripts.extract import Extract
 from lib.utils import BackgroundGenerator, get_folder, get_image_paths
 
 from plugins.PluginLoader_multi import PluginLoader
+from time import time
 
 
 class Convert(object):
     """ The convert process. """
+
     def __init__(self, arguments):
         self.args = arguments
         self.output_dir = get_folder(self.args.output_dir)
@@ -27,37 +29,60 @@ class Convert(object):
 
         self.opts = OptionalActions(self.args, self.images.input_images)
 
+        # init for models
+        self.model = self.load_model()
+        self.converter = self.load_converter(self.model)
+
+
     def process(self):
         """ Original & LowMem models go with Adjust or Masked converter
 
             Note: GAN prediction outputs a mask + an image, while other
             predicts only an image. """
+        ## TODO:统计时间消耗
+        start = time()
         Utils.set_verbosity(self.args.verbose)
+
+        self.images = Images(self.args)
+        self.faces = Faces(self.args)
+        self.alignments = Alignments(self.args)
 
         if not self.alignments.have_alignments_file:
             self.generate_alignments()
 
         self.faces.faces_detected = self.alignments.read_alignments()
 
-        model = self.load_model()
-        converter = self.load_converter(model)
+        # model = self.load_model()
+        # converter = self.load_converter(model)
 
-        batch = BackgroundGenerator(self.prepare_images(), 1)
+        middle = time()
+        ## TODO:统计时间消耗
+        # batch = BackgroundGenerator(self.prepare_images(), 1)
+        batch = self.prepare_images()
 
-        for item in batch.iterator():
-            self.convert(converter, item)
+        for item in batch:
+            self.convert(self.converter, item)
 
         Utils.finalize(self.images.images_found,
                        self.faces.num_faces_detected,
                        self.faces.verify_output)
 
+        self.alignments.have_alignments_file = False
+        self.alignments.alignments_path = None
+
+        end = time()
+        print("process img count:" + str(len(batch)))
+        print("process first step:" + str(middle - start) + "秒")
+        print("process second step:" + str(end - middle) + "秒")
+
     def generate_alignments(self):
         """ Generate an alignments file if one does not already
         exist. Does not save extracted faces """
         print('Alignments file not found. Generating at default values...')
-        extract = Extract(self.args)
-        extract.export_face = False
-        extract.process()
+        # init extract
+        self.extract = Extract(self.args)
+        self.extract.export_face = False
+        self.extract.process()
 
     def load_model(self):
         """ Load the model requested for conversion """
@@ -96,6 +121,7 @@ class Convert(object):
     def prepare_images(self):
         """ Prepare the images for conversion """
         filename = ""
+        batch_data = []
         for filename in tqdm(self.images.input_images, file=sys.stdout):
             if not self.check_alignments(filename):
                 continue
@@ -103,8 +129,9 @@ class Convert(object):
             faces = self.faces.get_faces_alignments(filename, image)
             if not faces:
                 continue
-
-            yield filename, image, faces
+            batch_data.append([filename,image,faces])
+            # yield filename, image, faces
+        return batch_data
 
     def check_alignments(self, filename):
         """ If we have no alignments for this image, skip it """
@@ -118,15 +145,19 @@ class Convert(object):
         """ Apply the conversion transferring faces onto frames """
         try:
             filename, image, faces = item
-            skip = self.opts.check_skipframe(filename)
+            # skip = self.opts.check_skipframe(filename)
+            start = time()
+            # if not skip:
+            for idx, face in faces:
+                image = self.convert_one_face(converter,(filename, image, idx, face))
+            middle = time()
+            print("process convert step:" + str(middle - start) + "秒")
 
-            if not skip:
-                for idx, face in faces:
-                    image = self.convert_one_face(converter,
-                                                  (filename, image, idx, face))
-            if skip != "discard":
-                filename = str(self.output_dir / Path(filename).name)
-                Utils.cv2_read_write('write', filename, image)
+            # if skip != "discard":
+            filename = str(self.output_dir / Path(filename).name)
+            Utils.cv2_read_write('write', filename, image)
+            end = time()
+            print("process convert save img step:" + str(end - middle) + "秒")
         except Exception as err:
             print("Failed to convert image: {}. "
                   "Reason: {}".format(filename, err))
