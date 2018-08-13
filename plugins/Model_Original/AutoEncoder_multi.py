@@ -29,11 +29,17 @@ class AutoEncoder_multi:
             print(e)
             return False
 
-    def save_weights(self):
+    def save_weights(self, diff = None):
         model_dir = str(self.model_dir)
-        for model in hdf.values():
-            backup_file(model_dir, model)
-        self.encoder.save_weights(str(self.model_dir / hdf['encoderH5']))
-        for i in range(len(self.decoder)):
-            self.decoder[i].save_weights(str(self.model_dir)+'/'+'decoder_'+str(i)+'.h5')
-        print('saved model weights')
+        if diff is not None:
+            self.encoder.save_weights(str(self.model_dir) +'/'+ str(diff) + '_' + hdf['encoderH5'])
+            for i in range(len(self.decoder)):
+                self.decoder[i].save_weights(str(self.model_dir) + '/' + str(diff) + '_' + 'decoder_' + str(i) + '.h5')
+            print('saved model weights')
+        else:
+            for model in hdf.values():
+                backup_file(model_dir, model)
+            self.encoder.save_weights(str(self.model_dir / hdf['encoderH5']))
+            for i in range(len(self.decoder)):
+                self.decoder[i].save_weights(str(self.model_dir)+'/'+'decoder_'+str(i)+'.h5')
+            print('saved model weights')

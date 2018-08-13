@@ -119,13 +119,16 @@ class Train(object):
             save_iteration = iteration % self.args.save_interval == 0
             viewer = self.show if save_iteration or self.save_now else None
             trainer.train_one_step(iteration, viewer)
-            if self.stop:
-                break
-            elif save_iteration:
-                model.save_weights()
-            elif self.save_now:
-                model.save_weights()
-                self.save_now = False
+            if iteration % self.args.save_diff_models == 0:
+                model.save_weights(diff = iteration)
+            else:
+                if self.stop:
+                    break
+                elif save_iteration:
+                    model.save_weights()
+                elif self.save_now:
+                    model.save_weights()
+                    self.save_now = False
         model.save_weights()
         self.stop = True
 
@@ -180,7 +183,7 @@ class Train(object):
         try:
             scriptpath = os.path.realpath(os.path.dirname(sys.argv[0]))
             if self.args.write_image:
-                img = "_sample_{}.jpg".format(name)
+                img = "_sample_{}_{}.jpg".format(name,self.args.trainer)
                 imgfile = os.path.join(scriptpath, img)
                 cv2.imwrite(imgfile, image)
             if self.args.redirect_gui:

@@ -139,6 +139,10 @@ or not self.args.skip_existing):
             print("Input directory {} not found.".format(self.args.input_dir))
             exit(1)
 
+        if type(self.args.input_dir) == list:
+            print('Input List with Length {}'.format(len(self.args.input_dir)))
+            return self.args.input_dir
+
         print("Input Directory: {}".format(self.args.input_dir))
 
         if hasattr(self.args, 'skip_existing') and self.args.skip_existing:
