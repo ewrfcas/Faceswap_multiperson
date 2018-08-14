@@ -3,13 +3,15 @@ from scripts import convert_multi
 import argparse
 import os
 from plugins.PluginLoader_multi import PluginLoader
+from scripts import train
 
 parser = argparse.ArgumentParser(description='parameters for hacker')
 # extract & convert
 parser.add_argument('-i','--input-dir', default='data/A/')
+parser.add_argument('-il','--input-list', default=None)
 parser.add_argument('-a','--input-aligned-dir', default=None)
-parser.add_argument('-pn','--person-num', default=0)
-parser.add_argument('-ct','--convert-target', default=1)
+parser.add_argument('-pn','--person-num', default=5)
+parser.add_argument('-ct','--convert-target', default=3)
 parser.add_argument('-o','--output-dir', default='data/B/')
 parser.add_argument('-A','--alignments-path', default=None)
 parser.add_argument('-se','--serializer', default='json')
@@ -25,14 +27,13 @@ parser.add_argument('-M','--mask-type', choices=["rect", "facehull", "facehullan
 
 # train
 parser.add_argument('-in','--inputs', default=['data/trainset/A/','data/trainset/B/','data/trainset/C/','data/trainset/D/','data/trainset/E/'])
-parser.add_argument('-si','--save-interval', default=100)
-parser.add_argument('-bs','--batch-size', default=32)
-parser.add_argument('-sdm','--save-diff-models', default=2000)
-parser.add_argument('-it','--iterations', default=30000)
+parser.add_argument('-si','--save-interval', default=30)
+parser.add_argument('-bs','--batch-size', default=16)
+parser.add_argument('-it','--iterations', default=1000)
 parser.add_argument('-p','--preview', default=False)
 parser.add_argument('-w','--write-image', default=True)
 parser.add_argument('-pl','--perceptual-loss', default=False)
-parser.add_argument('-ag','--allow-growth', default=False)
+parser.add_argument('-ag','--allow-growth', default=True)
 parser.add_argument('-gui','--redirect_gui', default=False)
 
 # common
@@ -54,6 +55,20 @@ parser.add_argument('-v','--verbose', default=True)
 
 args = parser.parse_args()
 
-train_model = train_multi.Train(args)
-train_model.process()
+convert_model = convert_multi.Convert(args)
+convert_model.process()
+
+# while True:
+#     files = os.listdir(args.input_dir)
+#     if 'alignments.json' in files:
+#         files.remove('alignments.json')
+#     files = list(map(lambda x:args.input_dir+x,files))
+#     files = list(filter(lambda x:os.access(x,os.R_OK),files))
+#     print('length:',len(files))
+#     if len(files) > 0:
+#         convert_model.args.input_list = files
+#         convert_model.process()
+#         [os.remove(f) for f in files]
+#         if os.path.exists(os.path.join(args.input_dir, 'alignments.json')):
+#             os.remove(os.path.join(args.input_dir,'alignments.json'))
 

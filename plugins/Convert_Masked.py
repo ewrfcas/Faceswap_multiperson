@@ -4,6 +4,10 @@ import cv2
 import numpy
 
 from lib.aligner import get_align_mat
+import numpy as np
+from scripts.fsmedia import Utils
+from pathlib import Path
+from tqdm import tqdm
 
 class Convert():
     def __init__(self, encoder, trainer, blur_size=2, seamless_clone=False, mask_type="facehullandrect", erosion_kernel_size=None, match_histogram=False, sharpen_image=None, **kwargs):
@@ -22,28 +26,74 @@ class Convert():
         self.match_histogram = match_histogram
         self.mask_type = mask_type.lower() # Choose in 'FaceHullAndRect','FaceHull','Rect'
 
-    def patch_image( self, image, face_detected, size ):
-
+    def patch_image( self, image, face_detected, size):
         image_size = image.shape[1], image.shape[0]
-
         mat = numpy.array(get_align_mat(face_detected, size, should_align_eyes=False)).reshape(2,3)
-
         if "GAN" not in self.trainer:
             mat = mat * size
         else:
-            padding = int(48/256*size)
+            padding = int(48 / 256 * size)
             mat = mat * (size - 2 * padding)
             mat[:,2] += padding
-
         new_face = self.get_new_face(image,mat,size)
-
-        image_mask = self.get_image_mask( image, new_face, face_detected.landmarks_as_xy(), mat, image_size )
-
+        image_mask = self.get_image_mask(image, new_face, face_detected.landmarks_as_xy(), mat, image_size)
         return self.apply_new_face(image, new_face, image_mask, mat, image_size, size)
 
+    def get_new_faces_batch(self, img_temp, face_temp, size):
+        faces = []
+        faces_clipped = []
+        image_dtype = img_temp[0].dtype
+        mats = []
+        for i in range(len(face_temp)):
+            mat = numpy.array(get_align_mat(face_temp[i], size, should_align_eyes=False)).reshape(2, 3)
+            if "GAN" not in self.trainer:
+                mat *= size
+            else:
+                padding = int(48 / 256 * size)
+                mat *= (size - 2 * padding)
+                mat[:, 2] += padding
+            mats.append(mat)
+            face = cv2.warpAffine(img_temp[i], mat, (size, size))
+            faces.append(numpy.expand_dims(face, 0))
+            faces_clipped.append(numpy.clip(face[0], 0, 255).astype(image_dtype))
+
+        # 暂时不支持GAN
+        faces = np.concatenate(faces, axis=0)
+        mask = None
+        if "GAN" not in self.trainer:
+            normalized_faces = faces / 255.0
+            # inference by batch
+            new_faces = self.encoder(normalized_faces)
+            new_faces = numpy.clip(new_faces * 255, 0, 255).astype(image_dtype)
+        else:
+            normalized_faces = faces / 255.0 * 2 - 1
+            fake_output = self.encoder(normalized_faces)
+            if "128" in self.trainer: # TODO: Another hack to switch between 64 and 128
+                fake_output = fake_output[0]
+            mask = fake_output[:,:,:,:1]
+            new_faces = fake_output[:,:,:,1:]
+            new_faces = mask * new_faces + (1 - mask) * normalized_faces
+            new_faces = numpy.clip((new_faces + 1) * 255 / 2, 0, 255).astype(image_dtype)
+
+        if self.match_histogram:
+            for i in range(new_faces.shape[0]):
+                new_faces[i,::] = self.color_hist_match(new_faces[i,::], faces_clipped, mask)
+
+        return new_faces, mats
+
+    def get_new_imgs_batch(self, inputs):
+        image_all, face_all, new_faces, mats, filenames, size, output_dir, img_util = inputs
+        assert len(face_all) == new_faces.shape[0]
+        for i in tqdm(range(len(face_all))):
+            image_size = image_all[i].shape[1], image_all[i].shape[0]
+            image_mask = self.get_image_mask(image_all[i], new_faces[i,::], face_all[i].landmarks_as_xy(), mats[i], image_size)
+            new_img = self.apply_new_face(image_all[i], new_faces[i,::], image_mask, mats[i], image_size, size)
+            filename = str(output_dir / Path(filenames[i]).name)
+            Utils.cv2_read_write('write', filename, img_util.rotate_image(new_img, face_all[i].r, reverse=True))
+
     def apply_new_face(self, image, new_face, image_mask, mat, image_size, size):
-        base_image = numpy.copy( image )
-        new_image = numpy.copy( image )
+        base_image = numpy.copy(image)
+        new_image = numpy.copy(image)
 
         cv2.warpAffine( new_face, mat, image_size, new_image, cv2.WARP_INVERSE_MAP | cv2.INTER_CUBIC, cv2.BORDER_TRANSPARENT )
         
@@ -58,7 +108,6 @@ class Convert():
             new_image = cv2.addWeighted(
                 new_image, 1.5, gaussain_blur, -0.5, 0, new_image)
 
-        outimage = None
         if self.seamless_clone:
             unitMask = numpy.clip( image_mask * 365, 0, 255 ).astype(numpy.uint8)
 
@@ -67,8 +116,8 @@ class Convert():
             if maxregion.size > 0:
               miny,minx = maxregion.min(axis=0)[:2]
               maxy,maxx = maxregion.max(axis=0)[:2]
-              lenx = maxx - minx;
-              leny = maxy - miny;
+              lenx = maxx - minx
+              leny = maxy - miny
               masky = int(minx+(lenx//2))
               maskx = int(miny+(leny//2))
               outimage = cv2.seamlessClone(new_image.astype(numpy.uint8),base_image.astype(numpy.uint8),unitMask,(masky,maskx) , cv2.NORMAL_CLONE )
@@ -122,7 +171,6 @@ class Convert():
         face = cv2.warpAffine( image, mat, (size,size) )
         face = numpy.expand_dims( face, 0 )
         face_clipped = numpy.clip(face[0], 0, 255).astype( image.dtype )
-        new_face = None
         mask = None
 
         if "GAN" not in self.trainer:

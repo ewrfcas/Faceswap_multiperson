@@ -5,16 +5,14 @@ import re
 import os
 import sys
 from pathlib import Path
-
+from multiprocessing import Pool
 from tqdm import tqdm
-
 from scripts.fsmedia import Alignments, Images, Faces, Utils
 from scripts.extract import Extract
 from lib.utils import BackgroundGenerator, get_folder, get_image_paths
-
 from plugins.PluginLoader_multi import PluginLoader
 from time import time
-
+import numpy as np
 
 class Convert(object):
     """ The convert process. """
@@ -22,12 +20,6 @@ class Convert(object):
     def __init__(self, arguments):
         self.args = arguments
         self.output_dir = get_folder(self.args.output_dir)
-
-        self.images = Images(self.args)
-        self.faces = Faces(self.args)
-        self.alignments = Alignments(self.args)
-
-        self.opts = OptionalActions(self.args, self.images.input_images)
 
         # init for models
         self.model = self.load_model()
@@ -46,22 +38,23 @@ class Convert(object):
         self.images = Images(self.args)
         self.faces = Faces(self.args)
         self.alignments = Alignments(self.args)
+        self.opts = OptionalActions(self.args, self.images.input_images)
 
         if not self.alignments.have_alignments_file:
             self.generate_alignments()
 
         self.faces.faces_detected = self.alignments.read_alignments()
 
-        # model = self.load_model()
-        # converter = self.load_converter(model)
-
         middle = time()
         ## TODO:统计时间消耗
         # batch = BackgroundGenerator(self.prepare_images(), 1)
+        # 获取数据
         batch = self.prepare_images()
 
-        for item in batch:
-            self.convert(self.converter, item)
+        self.convert_batch(self.converter, items=batch)
+
+        # for item in tqdm(batch):
+            # self.convert(self.converter, item)
 
         Utils.finalize(self.images.images_found,
                        self.faces.num_faces_detected,
@@ -141,23 +134,71 @@ class Convert(object):
                        "skipping".format(os.path.basename(filename)))
         return have_alignments
 
+    def convert_batch(self, converter, items, multi_process_num = 8):
+        # try:
+        # face2idx
+        face_all = []
+        image_all = []
+        filename_all =[]
+        # 如果同一画面中出现多个人脸，只取面积最大的一张脸
+        for idx, item in enumerate(items):
+            filename_all.append(item[0])
+            max_ = 0
+            best_face = None
+            for _, face in item[-1]:
+                if face.image.shape[0]*face.image.shape[1]>max_:
+                    max_ = face.image.shape[0]*face.image.shape[1]
+                    best_face = face
+            face_all.append(best_face)
+            image_all.append(self.images.rotate_image(item[1], best_face.r))
+
+        # convert faces by batch
+        n_batch = len(face_all) // self.args.batch_size
+        if len(face_all) % self.args.batch_size != 0:
+            n_batch += 1
+        size = 128 if (self.args.trainer.strip().lower() in ('gan128', 'originalhighres')) else 64
+        new_faces = []
+        mats = []
+        for i in tqdm(range(n_batch)):
+            face_temp = face_all[i * self.args.batch_size:(i + 1) * self.args.batch_size]
+            img_temp = image_all[i * self.args.batch_size:(i + 1) * self.args.batch_size]
+            # converting by model
+            new_face_temp, mat_temp = converter.get_new_faces_batch(img_temp, face_temp, size)
+            new_faces.append(new_face_temp)
+            mats.extend(mat_temp)
+        new_faces = np.concatenate(new_faces, axis=0)
+        assert len(new_faces)==len(image_all)
+
+        converter.get_new_imgs_batch([image_all, face_all, new_faces, mats, filename_all, size, self.output_dir, self.images])
+        # # 多进程
+        # temp_len = len(new_faces) // multi_process_num
+        # pool_inputs = []
+        # for i in range(len(new_faces)):
+        #     pool_inputs.append([image_all[i*temp_len:(i+1)*temp_len], face_all[i*temp_len:(i+1)*temp_len],
+        #                         new_faces[i*temp_len:(i+1)*temp_len,::], mats[i*temp_len:(i+1)*temp_len],
+        #                         filename_all[i*temp_len:(i+1)*temp_len], size, self.output_dir, self.images])
+        # pool = Pool(multi_process_num)
+        # for pi in pool_inputs:
+        #     pool.apply_async(converter.get_new_imgs_batch, kwds={'inputs': pi})
+        # pool.close()
+        # pool.join()
+
+
+        # except Exception as err:
+        #     print("Failed to convert images batch with", err)
+
     def convert(self, converter, item):
         """ Apply the conversion transferring faces onto frames """
         try:
             filename, image, faces = item
             # skip = self.opts.check_skipframe(filename)
-            start = time()
             # if not skip:
             for idx, face in faces:
                 image = self.convert_one_face(converter,(filename, image, idx, face))
-            middle = time()
-            print("process convert step:" + str(middle - start) + "秒")
 
             # if skip != "discard":
             filename = str(self.output_dir / Path(filename).name)
             Utils.cv2_read_write('write', filename, image)
-            end = time()
-            print("process convert save img step:" + str(end - middle) + "秒")
         except Exception as err:
             print("Failed to convert image: {}. "
                   "Reason: {}".format(filename, err))
