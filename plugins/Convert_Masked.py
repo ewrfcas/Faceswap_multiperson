@@ -81,15 +81,26 @@ class Convert():
 
         return new_faces, mats
 
-    def get_new_imgs_batch(self, inputs):
-        image_all, face_all, new_faces, mats, filenames, size, output_dir, img_util = inputs
-        assert len(face_all) == new_faces.shape[0]
-        for i in tqdm(range(len(face_all))):
-            image_size = image_all[i].shape[1], image_all[i].shape[0]
-            image_mask = self.get_image_mask(image_all[i], new_faces[i,::], face_all[i].landmarks_as_xy(), mats[i], image_size)
-            new_img = self.apply_new_face(image_all[i], new_faces[i,::], image_mask, mats[i], image_size, size)
-            filename = str(output_dir / Path(filenames[i]).name)
-            Utils.cv2_read_write('write', filename, img_util.rotate_image(new_img, face_all[i].r, reverse=True))
+    def get_new_img_one(self, inputs):
+        def rotate_image(image, rotation, reverse=False):
+            """ Rotate the image forwards or backwards """
+            if rotation != 0:
+                if not reverse:
+                    self.rotation_height, self.rotation_width = image.shape[:2]
+                    image = Utils.rotate_image_by_angle(image, rotation)
+                else:
+                    image = Utils.rotate_image_by_angle(
+                        image,
+                        rotation * -1,
+                        rotated_width=self.rotation_width,
+                        rotated_height=self.rotation_height)
+            return image
+        image, face, new_face, mat, filename, size, output_dir = inputs
+        image_size = image.shape[1], image.shape[0]
+        image_mask = self.get_image_mask(image, new_face, face.landmarks_as_xy(), mat, image_size)
+        new_img = self.apply_new_face(image, new_face, image_mask, mat, image_size, size)
+        filename = str(output_dir / Path(filename).name)
+        Utils.cv2_read_write('write', filename, rotate_image(new_img, face.r, reverse=True))
 
     def apply_new_face(self, image, new_face, image_mask, mat, image_size, size):
         base_image = numpy.copy(image)

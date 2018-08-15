@@ -102,7 +102,6 @@ class Model_multi():
     def converter(self, who):
         return lambda img: self.autoencoder[who].predict(img)
     
-    
     def conv(self, filters, kernel_size=5, strides=2, **kwargs):
         def block(x):
             x = Conv2D(filters, kernel_size=kernel_size, strides=strides, kernel_initializer=RandomNormal(0, 0.02), padding='same', **kwargs)(x)         
