@@ -59,21 +59,21 @@ parser.add_argument('-v','--verbose', default=True)
 args = parser.parse_args()
 
 convert_model = convert_multi.Convert(args)
-convert_model.process()
+# convert_model.process()
 
-# while True:
-#     files = os.listdir(args.input_dir)
-#     if 'alignments.json' in files:
-#         files.remove('alignments.json')
-#         files = list(map(lambda x:args.input_dir+x,files))
-#         files = list(filter(lambda x:os.access(x,os.R_OK),files))
-#         print('length:',len(files))
-#         if len(files) > 0:
-#             convert_model.args.input_list = files
-#             convert_model.process()
-#             [os.remove(f) for f in files]
-#             if os.path.exists(os.path.join(args.input_dir, 'alignments.json')):
-#                 os.remove(os.path.join(args.input_dir,'alignments.json'))
-#     else:
-#         print('alignments.json is not found')
+while True:
+    files = os.listdir(args.input_dir)
+    if 'alignments.json' in files:
+        files.remove('alignments.json')
+        files = list(map(lambda x:args.input_dir+x,files))
+        files = list(filter(lambda x:os.access(x,os.R_OK),files))
+        print('length:',len(files))
+        if len(files) > 0:
+            convert_model.args.input_list = files
+            convert_model.process()
+            [os.remove(f) for f in files]
+            if os.path.exists(os.path.join(args.input_dir, 'alignments.json')):
+                os.remove(os.path.join(args.input_dir,'alignments.json'))
+    else:
+        print('alignments.json is not found')
 
