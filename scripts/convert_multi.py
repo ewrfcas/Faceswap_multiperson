@@ -13,6 +13,7 @@ from plugins.PluginLoader_multi import PluginLoader
 from time import time
 import numpy as np
 from threadpool import ThreadPool,makeRequests
+from keras.models import load_model as Kload_model
 
 class Convert(object):
     """ The convert process. """
@@ -23,6 +24,8 @@ class Convert(object):
 
         # init for models
         self.model = self.load_model()
+        if self.args.anti:
+            self.anti_model = Kload_model(self.args.anti_path)
         self.converter = self.load_converter(self.model)
 
 
@@ -157,6 +160,8 @@ class Convert(object):
                 image_all.append(self.images.rotate_image(item[1], best_face.r))
 
         # convert faces by batch
+        score1s=[]
+        score2s=[]
         n_batch = len(face_all) // self.args.batch_size
         if len(face_all) % self.args.batch_size != 0:
             n_batch += 1
@@ -167,13 +172,22 @@ class Convert(object):
             face_temp = face_all[i * self.args.batch_size:(i + 1) * self.args.batch_size]
             img_temp = image_all[i * self.args.batch_size:(i + 1) * self.args.batch_size]
             # converting by model
-            new_face_temp, mat_temp = converter.get_new_faces_batch(img_temp, face_temp, size)
+            if self.args.anti:
+                new_face_temp, mat_temp, score1, score2 = converter.get_new_faces_batch(img_temp, face_temp, size, self.anti_model)
+                score1s.append(score1)
+                score2s.append(score2)
+            else:
+                new_face_temp, mat_temp = converter.get_new_faces_batch(img_temp, face_temp, size)
             new_faces.append(new_face_temp)
             mats.extend(mat_temp)
         new_faces = np.concatenate(new_faces, axis=0)
+        if self.args.anti:
+            score1s = np.concatenate(score1s)
+            score2s = np.concatenate(score2s)
+            for i in range(len(filename_all)):
+                img_type = '.'+filename_all[i].split('.')[-1]
+                filename_all[i] = filename_all[i].split(img_type)[0]+'_'+str(score1s[i][0])+'_'+str(score2s[i][0])+img_type
         assert len(new_faces)==len(image_all)
-
-        # converter.get_new_imgs_batch([image_all, face_all, new_faces, mats, filename_all, size, self.output_dir, self.images])
 
         # 多线程
         temp_output_dir = self.output_dir

@@ -39,7 +39,7 @@ class Convert():
         image_mask = self.get_image_mask(image, new_face, face_detected.landmarks_as_xy(), mat, image_size)
         return self.apply_new_face(image, new_face, image_mask, mat, image_size, size)
 
-    def get_new_faces_batch(self, img_temp, face_temp, size):
+    def get_new_faces_batch(self, img_temp, face_temp, size, anti_model=None):
         faces = []
         faces_clipped = []
         image_dtype = img_temp[0].dtype
@@ -60,10 +60,16 @@ class Convert():
         # 暂时不支持GAN
         faces = np.concatenate(faces, axis=0)
         mask = None
+        score1 = None
+        score2 = None
         if "GAN" not in self.trainer:
             normalized_faces = faces / 255.0
+            if anti_model is not None:
+                score1 = anti_model.predict(normalized_faces)
             # inference by batch
             new_faces = self.encoder(normalized_faces)
+            if anti_model is not None:
+                score2 = anti_model.predict(new_faces)
             new_faces = numpy.clip(new_faces * 255, 0, 255).astype(image_dtype)
         else:
             normalized_faces = faces / 255.0 * 2 - 1
@@ -78,8 +84,10 @@ class Convert():
         if self.match_histogram:
             for i in range(new_faces.shape[0]):
                 new_faces[i,::] = self.color_hist_match(new_faces[i,::], faces_clipped, mask)
-
-        return new_faces, mats
+        if anti_model is not None:
+            return new_faces, mats, score1, score2
+        else:
+            return new_faces, mats
 
     def get_new_img_one(self, inputs):
         def rotate_image(image, rotation, reverse=False):
